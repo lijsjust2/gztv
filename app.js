@@ -268,17 +268,24 @@ async function getStreamUrl(pk, name) {
 
 // ==================== 核心：获取并改写m3u8内容 ====================
 
-async function getM3U8Content(pk, name, channelId, proxyBase) {
+async function getM3U8Content(pk, name, channelId, proxyBase, channel) {
   // 检查m3u8内容缓存（5秒）
-  if (m3u8Cache[pk]) {
-    var remaining = m3u8Cache[pk].valTime - Date.now()
+  if (m3u8Cache[pk || channelId]) {
+    var remaining = m3u8Cache[pk || channelId].valTime - Date.now()
     if (remaining > 0) {
       log.dbg("[M3U8 Cache] " + name)
-      return m3u8Cache[pk]
+      return m3u8Cache[pk || channelId]
     }
   }
 
-  var streamUrl = await getStreamUrl(pk, name)
+  var streamUrl
+  // 检查是否有静态m3u8地址
+  if (channel && channel.url) {
+    streamUrl = channel.url
+    log.dbg("[Static URL] " + name + " -> " + streamUrl)
+  } else {
+    streamUrl = await getStreamUrl(pk, name)
+  }
 
   // 获取m3u8内容
   log.dbg("[M3U8 Fetch] " + name + " -> " + streamUrl.substring(0, 80) + "...")
@@ -288,7 +295,10 @@ async function getM3U8Content(pk, name, channelId, proxyBase) {
   }, 8000)
 
   if (resp.status !== 200) {
-    // 流地址可能过期，清除缓存重试
+    // 静态URL频道直接报错，GDTV动态频道清除缓存重试
+    if (channel && channel.url) {
+      throw new Error("m3u8获取失败: HTTP " + resp.status)
+    }
     delete streamUrlCache[pk]
     streamUrl = await getStreamUrl(pk, name)
     resp = await httpGet(streamUrl, {
@@ -340,7 +350,7 @@ async function getM3U8Content(pk, name, channelId, proxyBase) {
   var rewritten = rewriteM3U8(content, baseUrl, channelId, proxyBase)
 
   var result = { content: rewritten, baseUrl: baseUrl }
-  m3u8Cache[pk] = { content: rewritten, baseUrl: baseUrl, valTime: Date.now() + M3U8_CACHE_TTL }
+  m3u8Cache[pk || channelId] = { content: rewritten, baseUrl: baseUrl, valTime: Date.now() + M3U8_CACHE_TTL }
   return result
 }
 
@@ -478,7 +488,7 @@ var server = http.createServer(async function(req, res) {
   }
 
   try {
-    var m3u8Result = await getM3U8Content(channel.pk, channel.name, channel.id, proxyBase)
+    var m3u8Result = await getM3U8Content(channel.pk, channel.name, channel.id, proxyBase, channel)
 
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8")
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -513,11 +523,19 @@ async function handleTSProxy(url, res) {
   log.dbg("[TS] " + channelId + " -> " + realUrl.substring(0, 80) + "...")
 
   try {
-    var resp = await httpGet(realUrl, {
+    // 根据目标域名决定是否发送Referer
+    var reqHeaders = {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       "Accept": "*/*",
-      "Referer": "https://www.gdtv.cn/",
-    }, 10000)
+    }
+    // 只有荔枝网CDN和央视频CDN需要Referer
+    if (realUrl.indexOf("itouchtv.cn") !== -1 || realUrl.indexOf("gdtv.cn") !== -1) {
+      reqHeaders["Referer"] = "https://www.gdtv.cn/"
+    } else if (realUrl.indexOf("yangshipin.cn") !== -1 || realUrl.indexOf("smtcdns.net") !== -1 || realUrl.indexOf("ysp.cctv.cn") !== -1) {
+      reqHeaders["Referer"] = "https://w.yangshipin.cn/"
+    }
+
+    var resp = await httpGet(realUrl, reqHeaders, 10000)
 
     if (resp.status !== 200) {
       log.err("[TS FAIL] " + channelId + " HTTP " + resp.status)

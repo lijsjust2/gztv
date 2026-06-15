@@ -1,0 +1,1 @@
+{"name":"gdtv-live-proxy","version":"6.0.0","description":"荔枝网(GDTV)直播源代理服务 - 全代理模式(m3u8+ts代理转发)，实现无缝持续播放","main":"app.js","type":"module","scripts":{"start":"node app.js"},"dependencies":{"puppeteer-core":"^23.0.0"},"keywords":["gdtv","grtn","iptv","live","proxy","m3u8","广东台","荔枝网"],"license":"MIT"}

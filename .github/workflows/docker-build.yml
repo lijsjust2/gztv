@@ -1,0 +1,154 @@
+name: Build and Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本号（如 1.0.0）'
+        required: true
+        default: 'latest'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Determine release version
+        id: rel
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: $VERSION"
+
+      - name: Set Docker Hub username
+        id: docker
+        run: echo "username=${{ secrets.DOCKERHUB_USERNAME }}" >> $GITHUB_OUTPUT
+
+      - name: Build and push AMD64 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          no-cache: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:amd64
+            ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}-amd64
+
+      - name: Build and push ARM64 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          no-cache: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64
+            ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}-arm64
+
+      - name: Create and push multi-arch manifest
+        run: |
+          # 创建 manifest list，合并多架构镜像
+          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }} \
+            ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:amd64 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64
+
+          # 如果是 latest 版本，也创建 latest tag
+          if [ "${{ steps.rel.outputs.version }}" = "latest" ]; then
+            docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:latest \
+              ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:amd64 \
+              ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64
+          fi
+
+          echo "=== Pushed images ==="
+          docker buildx imagetools inspect ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.rel.outputs.version }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: "v${{ steps.rel.outputs.version }}"
+          body: |
+            ## GDTV Live Proxy v${{ steps.rel.outputs.version }}
+
+            荔枝网(GDTV)直播源代理服务 - 全代理模式
+
+            ### Docker Hub 镜像
+
+            镜像已推送到 Docker Hub: `${{ steps.docker.outputs.username }}/gdtv-live-proxy`
+
+            ```bash
+            docker pull ${{ steps.docker.outputs.username }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
+            ```
+
+            ### 支持架构
+            - **AMD64** (x86_64) - 适用于普通 PC、服务器、云主机
+            - **ARM64** (aarch64) - 适用于树莓派、ARM 服务器
+
+            ### 快速部署
+
+            ```bash
+            # 拉取镜像（自动选择架构）
+            docker pull ${{ steps.docker.outputs.username }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
+
+            # 运行容器
+            docker run -d \
+              --name gdtv-proxy \
+              -p 5678:5678 \
+              -e TZ=Asia/Shanghai \
+              --restart unless-stopped \
+              ${{ steps.docker.outputs.username }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
+
+            # 访问 http://<IP>:5678 获取直播源列表
+            ```
+
+            ### 环境变量
+
+            | 变量 | 说明 | 默认值 |
+            |------|------|--------|
+            | `gport` | 服务端口 | 5678 |
+            | `ghost` | 公网访问地址 | 空 |
+            | `gpass` | 访问密码 | 空 |
+
+            ### 使用示例
+
+            ```bash
+            # 自定义端口和密码
+            docker run -d \
+              --name gdtv-proxy \
+              -p 8080:8080 \
+              -e gport=8080 \
+              -e gpass=mypassword \
+              -e TZ=Asia/Shanghai \
+              --restart unless-stopped \
+              ${{ steps.docker.outputs.username }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
+
+            # 访问 http://<IP>:8080/mypassword 获取直播源
+            ```
+          draft: false
+          prerelease: false

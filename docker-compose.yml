@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  gdtv-proxy:
+    image: ${DOCKERHUB_USERNAME}/gdtv-live-proxy:latest
+    container_name: gdtv-proxy
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5678}:${PORT:-5678}"
+    environment:
+      - gport=${PORT:-5678}
+      - ghost=${HOST:-}
+      - gpass=${PASS:-}
+      - TZ=Asia/Shanghai
+    # 如果需要使用本地 Chromium，可以挂载
+    # volumes:
+    #   - ./cache:/app/cache

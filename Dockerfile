@@ -37,12 +37,10 @@ COPY --from=builder /app/node_modules ./node_modules
 # 复制应用代码
 COPY app.js channels.js config.js ./
 
-# 创建非 root 用户
-RUN addgroup -g 1000 appuser && \
-    adduser -u 1000 -G appuser -D appuser && \
-    chown -R appuser:appuser /app
+# 使用 node 镜像自带的 node 用户
+RUN chown -R node:node /app
 
-USER appuser
+USER node
 
 # 环境变量
 ENV NODE_ENV=production

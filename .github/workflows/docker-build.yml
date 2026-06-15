@@ -70,6 +70,15 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64
             ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}-arm64
 
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.3
+
+      - name: Export images to tar files
+        run: |
+          # 从 Docker Hub 拉取并导出为 tar 文件
+          crane pull ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:amd64 /tmp/gdtv-live-proxy-amd64.tar
+          crane pull ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64 /tmp/gdtv-live-proxy-arm64.tar
+
       - name: Create and push multi-arch manifest
         run: |
           # 创建 manifest list，合并多架构镜像
@@ -87,12 +96,22 @@ jobs:
           echo "=== Pushed images ==="
           docker buildx imagetools inspect ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
 
+      - name: Compress image files
+        run: |
+          cd /tmp
+          gzip -9 gdtv-live-proxy-amd64.tar
+          gzip -9 gdtv-live-proxy-arm64.tar
+          ls -lh *.tar.gz
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.rel.outputs.version }}
           token: ${{ secrets.GITHUB_TOKEN }}
           name: "v${{ steps.rel.outputs.version }}"
+          files: |
+            /tmp/gdtv-live-proxy-amd64.tar.gz
+            /tmp/gdtv-live-proxy-arm64.tar.gz
           body: |
             ## GDTV Live Proxy v${{ steps.rel.outputs.version }}
 
@@ -106,6 +125,25 @@ jobs:
             docker pull ${{ steps.docker.outputs.username }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
             ```
 
+            ### Releases 镜像文件
+
+            可直接下载镜像文件并导入：
+
+            | 架构 | 文件 |
+            |------|------|
+            | AMD64 | `gdtv-live-proxy-amd64.tar.gz` |
+            | ARM64 | `gdtv-live-proxy-arm64.tar.gz` |
+
+            ```bash
+            # 下载并导入镜像
+            wget https://github.com/lijsjust2/gztv/releases/download/v${{ steps.rel.outputs.version }}/gdtv-live-proxy-amd64.tar.gz
+            docker load -i gdtv-live-proxy-amd64.tar.gz
+
+            # 或 ARM64
+            wget https://github.com/lijsjust2/gztv/releases/download/v${{ steps.rel.outputs.version }}/gdtv-live-proxy-arm64.tar.gz
+            docker load -i gdtv-live-proxy-arm64.tar.gz
+            ```
+
             ### 支持架构
             - **AMD64** (x86_64) - 适用于普通 PC、服务器、云主机
             - **ARM64** (aarch64) - 适用于树莓派、ARM 服务器
@@ -113,7 +151,7 @@ jobs:
             ### 快速部署
 
             ```bash
-            # 拉取镜像（自动选择架构）
+            # Docker Hub 拉取（自动选择架构）
             docker pull ${{ steps.docker.outputs.username }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
 
             # 运行容器

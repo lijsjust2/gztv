@@ -43,7 +43,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Release version: $VERSION"
 
-      # === 构建镜像（始终执行）===
+      # === 构建镜像（始终执行，导出为 tar 文件）===
       - name: Build AMD64 image
         uses: docker/build-push-action@v5
         with:
@@ -112,6 +112,7 @@ jobs:
           cd /tmp
           gzip -9 gdtv-live-proxy-amd64.tar
           gzip -9 gdtv-live-proxy-arm64.tar
+          echo "=== 镜像文件 ==="
           ls -lh *.tar.gz
 
       # === 创建 GitHub Release（始终执行）===
@@ -120,34 +121,27 @@ jobs:
         with:
           tag_name: v${{ steps.rel.outputs.version }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          name: "GDTV Live Proxy v${{ steps.rel.outputs.version }}"
+          name: "v${{ steps.rel.outputs.version }}"
           files: |
             /tmp/gdtv-live-proxy-amd64.tar.gz
             /tmp/gdtv-live-proxy-arm64.tar.gz
           body: |
             ## GDTV Live Proxy v${{ steps.rel.outputs.version }}
 
-            荔枝网(GDTV)直播源代理服务 - 全代理模式
+            荔枝网(GDTV)直播源代理服务
 
-            ### Releases 镜像文件
+            ### 支持架构
+            - **AMD64** (x86_64) - 适用于普通 PC、服务器、云主机
+            - **ARM64** (aarch64) - 适用于树莓派、ARM 服务器
 
-            可直接下载镜像文件并导入：
-
-            | 架构 | 文件 | 大小 |
-            |------|------|------|
-            | AMD64 (x86_64) | `gdtv-live-proxy-amd64.tar.gz` | PC、服务器、云主机 |
-            | ARM64 (aarch64) | `gdtv-live-proxy-arm64.tar.gz` | 树莓派、ARM 服务器 |
+            ### 快速部署
 
             ```bash
-            # 下载并导入镜像（AMD64）
-            wget https://github.com/lijsjust2/gztv/releases/download/v${{ steps.rel.outputs.version }}/gdtv-live-proxy-amd64.tar.gz
+            # 1. 下载对应架构的镜像（以 AMD64 为例）
+            # 2. 加载镜像
             docker load -i gdtv-live-proxy-amd64.tar.gz
 
-            # 或 ARM64
-            wget https://github.com/lijsjust2/gztv/releases/download/v${{ steps.rel.outputs.version }}/gdtv-live-proxy-arm64.tar.gz
-            docker load -i gdtv-live-proxy-arm64.tar.gz
-
-            # 运行容器
+            # 3. 运行
             docker run -d \
               --name gdtv-proxy \
               -p 5678:5678 \
@@ -155,35 +149,20 @@ jobs:
               --restart unless-stopped \
               gdtv-live-proxy:amd64
 
-            # 访问 http://<IP>:5678 获取直播源列表
+            # 4. 访问 http://<IP>:5678 获取直播源列表
             ```
 
-            ${{
-              if github.event_name == 'push' || inputs.push_to_dockerhub == 'true' then
-            '### Docker Hub 镜像
-
-            镜像已推送到 Docker Hub:
+            ### ARM64 设备
 
             ```bash
-            docker pull lijsfun/gdtv-live-proxy:' + steps.rel.outputs.version + '
-            ```
-
-            ```bash
-            # 快速部署
+            docker load -i gdtv-live-proxy-arm64.tar.gz
             docker run -d \
               --name gdtv-proxy \
               -p 5678:5678 \
               -e TZ=Asia/Shanghai \
               --restart unless-stopped \
-              lijsfun/gdtv-live-proxy:' + steps.rel.outputs.version + '
+              gdtv-live-proxy:arm64
             ```
-            '
-              else ''
-            }}
-
-            ### 支持架构
-            - **AMD64** (x86_64) - 普通 PC、服务器、云主机
-            - **ARM64** (aarch64) - 树莓派、ARM 服务器
 
             ### 环境变量
 
@@ -193,7 +172,7 @@ jobs:
             | `ghost` | 公网访问地址 | 空 |
             | `gpass` | 访问密码 | 空 |
 
-            ### 使用示例
+            ### 自定义配置
 
             ```bash
             # 自定义端口和密码

@@ -10,6 +10,11 @@ on:
         required: true
         default: 'latest'
         type: string
+      push_to_dockerhub:
+        description: '是否上传到 Docker Hub'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -27,12 +32,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Determine release version
         id: rel
         run: |
@@ -44,58 +43,70 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Release version: $VERSION"
 
-      - name: Set Docker Hub username
-        id: docker
-        run: echo "username=${{ secrets.DOCKERHUB_USERNAME }}" >> $GITHUB_OUTPUT
-
-      - name: Build and push AMD64 image
+      # === 构建镜像（始终执行）===
+      - name: Build AMD64 image
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/amd64
-          push: true
+          push: false
           no-cache: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:amd64
-            ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}-amd64
+          outputs: type=docker,dest=/tmp/gdtv-live-proxy-amd64.tar
+          tags: gdtv-live-proxy:amd64
 
-      - name: Build and push ARM64 image
+      - name: Build ARM64 image
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/arm64
-          push: true
+          push: false
           no-cache: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64
-            ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}-arm64
+          outputs: type=docker,dest=/tmp/gdtv-live-proxy-arm64.tar
+          tags: gdtv-live-proxy:arm64
 
-      - name: Install crane
-        uses: imjasonh/setup-crane@v0.3
+      # === 上传到 Docker Hub（可选）===
+      - name: Login to Docker Hub
+        if: ${{ github.event_name == 'push' || inputs.push_to_dockerhub }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Export images to tar files
+      - name: Push AMD64 to Docker Hub
+        if: ${{ github.event_name == 'push' || inputs.push_to_dockerhub }}
         run: |
-          # 从 Docker Hub 拉取并导出为 tar 文件
-          crane pull ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:amd64 /tmp/gdtv-live-proxy-amd64.tar
-          crane pull ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64 /tmp/gdtv-live-proxy-arm64.tar
+          docker load -i /tmp/gdtv-live-proxy-amd64.tar
+          docker tag gdtv-live-proxy:amd64 ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}-amd64
+          docker tag gdtv-live-proxy:amd64 ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:amd64
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}-amd64
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:amd64
 
-      - name: Create and push multi-arch manifest
+      - name: Push ARM64 to Docker Hub
+        if: ${{ github.event_name == 'push' || inputs.push_to_dockerhub }}
         run: |
-          # 创建 manifest list，合并多架构镜像
+          docker load -i /tmp/gdtv-live-proxy-arm64.tar
+          docker tag gdtv-live-proxy:arm64 ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}-arm64
+          docker tag gdtv-live-proxy:arm64 ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}-arm64
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64
+
+      - name: Create multi-arch manifest on Docker Hub
+        if: ${{ github.event_name == 'push' || inputs.push_to_dockerhub }}
+        run: |
           docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }} \
             ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:amd64 \
             ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64
 
-          # 如果是 latest 版本，也创建 latest tag
           if [ "${{ steps.rel.outputs.version }}" = "latest" ]; then
             docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:latest \
               ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:amd64 \
               ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:arm64
           fi
 
-          echo "=== Pushed images ==="
+          echo "=== Docker Hub images pushed ==="
           docker buildx imagetools inspect ${{ secrets.DOCKERHUB_USERNAME }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
 
+      # === 压缩镜像文件（始终执行）===
       - name: Compress image files
         run: |
           cd /tmp
@@ -103,12 +114,13 @@ jobs:
           gzip -9 gdtv-live-proxy-arm64.tar
           ls -lh *.tar.gz
 
+      # === 创建 GitHub Release（始终执行）===
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.rel.outputs.version }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          name: "v${{ steps.rel.outputs.version }}"
+          name: "GDTV Live Proxy v${{ steps.rel.outputs.version }}"
           files: |
             /tmp/gdtv-live-proxy-amd64.tar.gz
             /tmp/gdtv-live-proxy-arm64.tar.gz
@@ -117,42 +129,23 @@ jobs:
 
             荔枝网(GDTV)直播源代理服务 - 全代理模式
 
-            ### Docker Hub 镜像
-
-            镜像已推送到 Docker Hub: `${{ steps.docker.outputs.username }}/gdtv-live-proxy`
-
-            ```bash
-            docker pull ${{ steps.docker.outputs.username }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
-            ```
-
             ### Releases 镜像文件
 
             可直接下载镜像文件并导入：
 
-            | 架构 | 文件 |
-            |------|------|
-            | AMD64 | `gdtv-live-proxy-amd64.tar.gz` |
-            | ARM64 | `gdtv-live-proxy-arm64.tar.gz` |
+            | 架构 | 文件 | 大小 |
+            |------|------|------|
+            | AMD64 (x86_64) | `gdtv-live-proxy-amd64.tar.gz` | PC、服务器、云主机 |
+            | ARM64 (aarch64) | `gdtv-live-proxy-arm64.tar.gz` | 树莓派、ARM 服务器 |
 
             ```bash
-            # 下载并导入镜像
+            # 下载并导入镜像（AMD64）
             wget https://github.com/lijsjust2/gztv/releases/download/v${{ steps.rel.outputs.version }}/gdtv-live-proxy-amd64.tar.gz
             docker load -i gdtv-live-proxy-amd64.tar.gz
 
             # 或 ARM64
             wget https://github.com/lijsjust2/gztv/releases/download/v${{ steps.rel.outputs.version }}/gdtv-live-proxy-arm64.tar.gz
             docker load -i gdtv-live-proxy-arm64.tar.gz
-            ```
-
-            ### 支持架构
-            - **AMD64** (x86_64) - 适用于普通 PC、服务器、云主机
-            - **ARM64** (aarch64) - 适用于树莓派、ARM 服务器
-
-            ### 快速部署
-
-            ```bash
-            # Docker Hub 拉取（自动选择架构）
-            docker pull ${{ steps.docker.outputs.username }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
 
             # 运行容器
             docker run -d \
@@ -160,10 +153,37 @@ jobs:
               -p 5678:5678 \
               -e TZ=Asia/Shanghai \
               --restart unless-stopped \
-              ${{ steps.docker.outputs.username }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
+              gdtv-live-proxy:amd64
 
             # 访问 http://<IP>:5678 获取直播源列表
             ```
+
+            ${{
+              if github.event_name == 'push' || inputs.push_to_dockerhub == 'true' then
+            '### Docker Hub 镜像
+
+            镜像已推送到 Docker Hub:
+
+            ```bash
+            docker pull lijsfun/gdtv-live-proxy:' + steps.rel.outputs.version + '
+            ```
+
+            ```bash
+            # 快速部署
+            docker run -d \
+              --name gdtv-proxy \
+              -p 5678:5678 \
+              -e TZ=Asia/Shanghai \
+              --restart unless-stopped \
+              lijsfun/gdtv-live-proxy:' + steps.rel.outputs.version + '
+            ```
+            '
+              else ''
+            }}
+
+            ### 支持架构
+            - **AMD64** (x86_64) - 普通 PC、服务器、云主机
+            - **ARM64** (aarch64) - 树莓派、ARM 服务器
 
             ### 环境变量
 
@@ -184,7 +204,7 @@ jobs:
               -e gpass=mypassword \
               -e TZ=Asia/Shanghai \
               --restart unless-stopped \
-              ${{ steps.docker.outputs.username }}/gdtv-live-proxy:${{ steps.rel.outputs.version }}
+              gdtv-live-proxy:amd64
 
             # 访问 http://<IP>:8080/mypassword 获取直播源
             ```

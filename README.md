@@ -17,31 +17,6 @@
 
 ## 频道列表
 
-### 央视频道（静态源）
-
-| ID | 频道名称 | 直播链接 |
-|----|----------|----------|
-| cctv1 | CCTV1综合 | `/cctv1` |
-| cctv2 | CCTV2财经 | `/cctv2` |
-| cctv3 | CCTV3综艺 | `/cctv3` |
-| cctv4 | CCTV4中文国际 | `/cctv4` |
-| cctv5 | CCTV5体育 | `/cctv5` |
-| cctv5p | CCTV5+体育赛事 | `/cctv5p` |
-| cctv6 | CCTV6电影 | `/cctv6` |
-| cctv7 | CCTV7国防军事 | `/cctv7` |
-| cctv8 | CCTV8电视剧 | `/cctv8` |
-| cctv9 | CCTV9纪录 | `/cctv9` |
-| cctv10 | CCTV10科教 | `/cctv10` |
-| cctv11 | CCTV11戏曲 | `/cctv11` |
-| cctv12 | CCTV12社会与法 | `/cctv12` |
-| cctv13 | CCTV13新闻 | `/cctv13` |
-| cctv14 | CCTV14少儿 | `/cctv14` |
-| cctv15 | CCTV15音乐 | `/cctv15` |
-| cctv16 | CCTV16奥林匹克 | `/cctv16` |
-| cctv17 | CCTV17农业农村 | `/cctv17` |
-
-### 广东频道（GDTV动态源）
-
 | ID | 频道名称 | pk | 直播链接 |
 |----|----------|-----|----------|
 | gdws | 广东卫视 | 43 | `/gdws` |
@@ -62,10 +37,6 @@
 | jlp | 纪录片 | 94 | `/jlp` |
 | jk | 健康 | 99 | `/jk` |
 | grtsh | GRTN生活频道 | 102 | `/grtsh` |
-
-> **频道类型说明**：
-> - **央视频道**：使用稳定的第三方静态 m3u8 源，直接代理转发
-> - **广东频道**：通过荔枝网 API 动态获取带 token 的直播流地址，自动刷新 token 确保持续播放
 
 ## 快速部署
 

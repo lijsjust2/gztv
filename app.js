@@ -268,24 +268,17 @@ async function getStreamUrl(pk, name) {
 
 // ==================== 核心：获取并改写m3u8内容 ====================
 
-async function getM3U8Content(pk, name, channelId, proxyBase, channel) {
+async function getM3U8Content(pk, name, channelId, proxyBase) {
   // 检查m3u8内容缓存（5秒）
-  if (m3u8Cache[pk || channelId]) {
-    var remaining = m3u8Cache[pk || channelId].valTime - Date.now()
+  if (m3u8Cache[pk]) {
+    var remaining = m3u8Cache[pk].valTime - Date.now()
     if (remaining > 0) {
       log.dbg("[M3U8 Cache] " + name)
-      return m3u8Cache[pk || channelId]
+      return m3u8Cache[pk]
     }
   }
 
-  var streamUrl
-  // 检查是否有静态m3u8地址
-  if (channel && channel.url) {
-    streamUrl = channel.url
-    log.dbg("[Static URL] " + name + " -> " + streamUrl)
-  } else {
-    streamUrl = await getStreamUrl(pk, name)
-  }
+  var streamUrl = await getStreamUrl(pk, name)
 
   // 获取m3u8内容
   log.dbg("[M3U8 Fetch] " + name + " -> " + streamUrl.substring(0, 80) + "...")
@@ -295,10 +288,7 @@ async function getM3U8Content(pk, name, channelId, proxyBase, channel) {
   }, 8000)
 
   if (resp.status !== 200) {
-    // 静态URL频道直接报错，GDTV动态频道清除缓存重试
-    if (channel && channel.url) {
-      throw new Error("m3u8获取失败: HTTP " + resp.status)
-    }
+    // 流地址可能过期，清除缓存重试
     delete streamUrlCache[pk]
     streamUrl = await getStreamUrl(pk, name)
     resp = await httpGet(streamUrl, {
@@ -350,7 +340,7 @@ async function getM3U8Content(pk, name, channelId, proxyBase, channel) {
   var rewritten = rewriteM3U8(content, baseUrl, channelId, proxyBase)
 
   var result = { content: rewritten, baseUrl: baseUrl }
-  m3u8Cache[pk || channelId] = { content: rewritten, baseUrl: baseUrl, valTime: Date.now() + M3U8_CACHE_TTL }
+  m3u8Cache[pk] = { content: rewritten, baseUrl: baseUrl, valTime: Date.now() + M3U8_CACHE_TTL }
   return result
 }
 
@@ -488,7 +478,7 @@ var server = http.createServer(async function(req, res) {
   }
 
   try {
-    var m3u8Result = await getM3U8Content(channel.pk, channel.name, channel.id, proxyBase, channel)
+    var m3u8Result = await getM3U8Content(channel.pk, channel.name, channel.id, proxyBase)
 
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8")
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -523,19 +513,11 @@ async function handleTSProxy(url, res) {
   log.dbg("[TS] " + channelId + " -> " + realUrl.substring(0, 80) + "...")
 
   try {
-    // 根据目标域名决定是否发送Referer
-    var reqHeaders = {
+    var resp = await httpGet(realUrl, {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       "Accept": "*/*",
-    }
-    // 只有荔枝网CDN和央视频CDN需要Referer
-    if (realUrl.indexOf("itouchtv.cn") !== -1 || realUrl.indexOf("gdtv.cn") !== -1) {
-      reqHeaders["Referer"] = "https://www.gdtv.cn/"
-    } else if (realUrl.indexOf("yangshipin.cn") !== -1 || realUrl.indexOf("smtcdns.net") !== -1 || realUrl.indexOf("ysp.cctv.cn") !== -1) {
-      reqHeaders["Referer"] = "https://w.yangshipin.cn/"
-    }
-
-    var resp = await httpGet(realUrl, reqHeaders, 10000)
+      "Referer": "https://www.gdtv.cn/",
+    }, 10000)
 
     if (resp.status !== 200) {
       log.err("[TS FAIL] " + channelId + " HTTP " + resp.status)
@@ -588,9 +570,38 @@ function buildM3U(proxyBase, txtMode) {
   return lines.join("\n")
 }
 
+// ==================== 预热：启动时预先获取所有频道流地址 ====================
+
+async function warmup() {
+  log.warn("开始预热频道流地址...")
+  var t0 = Date.now()
+  var success = 0
+  var failed = 0
+
+  // 并行预热，每批5个频道
+  var batchSize = 5
+  for (var i = 0; i < channels.length; i += batchSize) {
+    var batch = channels.slice(i, i + batchSize)
+    var results = await Promise.allSettled(batch.map(function(ch) {
+      return getStreamUrl(ch.pk, ch.name)
+    }))
+    for (var j = 0; j < results.length; j++) {
+      if (results[j].status === "fulfilled") {
+        success++
+      } else {
+        log.err("[预热失败] " + batch[j].name + ": " + results[j].reason.message)
+        failed++
+      }
+    }
+  }
+
+  var sec = ((Date.now() - t0) / 1000).toFixed(1)
+  log.ok("预热完成: " + success + " 成功, " + failed + " 失败, 耗时 " + sec + " 秒")
+}
+
 // ==================== 启动 ====================
 
-server.listen(port, function() {
+server.listen(port, async function() {
   var sep = "========================================================"
   log.ok(sep)
   log.ok("  GDTV Live Proxy v6.0")
@@ -608,4 +619,7 @@ server.listen(port, function() {
   log.ok("  Strategy: API first, Puppeteer fallback")
   if (host) log.ok("  Public: " + host + (pass ? "/" + pass : ""))
   log.ok(sep)
+
+  // 启动后预热所有频道
+  await warmup()
 })

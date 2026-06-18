@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   gdtv-proxy:
@@ -11,6 +11,13 @@ services:
       - gport=${PORT:-5678}
       - ghost=${HOST:-}
       - gpass=${PASS:-}
+      - gmode=${MODE:-hybrid}
+      - gwarmup=${WARMUP:-true}
+      - gpreload=${PRELOAD:-true}
+      - gpreloadIdleMinutes=${PRELOAD_IDLE_MINUTES:-10}
+      - gmaxTsCache=${MAX_TS_CACHE:-200}
+      - gallowedHosts=${ALLOWED_HOSTS:-gdtv.cn,itouchtv.cn}
+      - gdebug=${DEBUG:-false}
       - TZ=Asia/Shanghai
     # 如果需要使用本地 Chromium，可以挂载
     # volumes:

@@ -47,6 +47,13 @@ ENV NODE_ENV=production
 ENV gport=5678
 ENV ghost=""
 ENV gpass=""
+ENV gmode=hybrid
+ENV gwarmup=true
+ENV gpreload=true
+ENV gpreloadIdleMinutes=10
+ENV gmaxTsCache=200
+ENV gallowedHosts="gdtv.cn,itouchtv.cn"
+ENV gdebug=false
 ENV TZ=Asia/Shanghai
 
 # 暴露端口
